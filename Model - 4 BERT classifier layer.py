@@ -144,7 +144,7 @@ model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy']
 #                     validation_data=ds_val, validation_steps=validation_steps)
 
 # Parameters as defined in https://github.com/huggingface/transformers
-history = model.fit(ds_train, epochs=EP, steps_per_epoch=115,
+history = model.fit(ds_train, epochs=N_EPOCHS, steps_per_epoch=115,
                     validation_data=ds_val, validation_steps=7)
 
 # %% id="qxcRpAQ5R_6F" colab_type="code" colab={}
