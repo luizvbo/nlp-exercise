@@ -33,16 +33,19 @@ spacy_nlp = spacy.load('en_core_web_sm')
 BERTMODEL = "distilbert-base-uncased"
 BATCH_SIZE = 32
 N_EPOCHS = 30
+LEARNING_RATE = 3e-5
 
 
 class BertClassifier(BaseEstimator, ClassifierMixin):
     def __init__(self, max_seq_len=MAX_LEN, batch_size=BATCH_SIZE,
-                 n_epochs=N_EPOCHS, val_size=0.1):
+                 n_epochs=N_EPOCHS, val_size=0.1,
+                 learning_rate=LEARNING_RATE):
 
         self.max_seq_len = max_seq_len
         self.batch_size = batch_size
         self.n_epochs = n_epochs
         self.val_size = val_size
+        self.learning_rate = learning_rate
 
         # Load dataset, tokenizer, model from pretrained model/vocabulary
         self.tokenizer = (
@@ -140,7 +143,7 @@ class BertClassifier(BaseEstimator, ClassifierMixin):
 
         # Prepare training: Compile tf.keras model with optimizer, loss and
         # learning rate schedule
-        optimizer = tf.keras.optimizers.Adam(learning_rate=3e-5,
+        optimizer = tf.keras.optimizers.Adam(learning_rate=self.learning_rate,
                                              epsilon=1e-08, clipnorm=1.0)
         loss = tf.keras.losses.binary_crossentropy
         metric = tf.keras.metrics.binary_accuracy
