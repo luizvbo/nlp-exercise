@@ -3,6 +3,9 @@ import re
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
 
+# Max. sentence length (to be used by all models)
+MAX_LEN = 300
+
 
 def preprocess(x):
     x = re.sub("<br\\s*/?>", " ", x)
