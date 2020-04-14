@@ -103,7 +103,7 @@ class BertClassifier(BaseEstimator, ClassifierMixin):
             np.array(attention_masks, dtype=np.int32)
         )
 
-    def create_dataset(self, X, y, buffer_size=10000, train=True):
+    def create_dataset(self, X, y, train=True):
 
         input_ids, att_masks = self.tokenize_sentences(X)
         # Convert labels to int32
@@ -143,14 +143,12 @@ class BertClassifier(BaseEstimator, ClassifierMixin):
 
         # Prepare training: Compile tf.keras model with optimizer, loss and
         # learning rate schedule
-        optimizer = tf.keras.optimizers.Adam(learning_rate=self.learning_rate,
-                                             epsilon=1e-08, clipnorm=1.0)
-        loss = tf.keras.losses.binary_crossentropy
-        metric = tf.keras.metrics.binary_accuracy
+        optimizer = tf.keras.optimizers.Adam(learning_rate=self.learning_rate)
 
-        self.model.compile(optimizer=optimizer, loss=loss, metrics=[metric])
+        self.model.compile(optimizer=optimizer,
+                           loss='binary_crossentropy',
+                           metrics=['accuracy'])
 
-        # Parameters as defined in https://github.com/huggingface/transformers
         self.history = self.model.fit(ds_train, epochs=self.n_epochs,
                                       steps_per_epoch=steps_per_epoch,
                                       validation_data=ds_val,
