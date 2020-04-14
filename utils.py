@@ -25,7 +25,7 @@ def get_x_y(df):
     return X, y
 
 
-def results(df, make_model, n_data_points):
+def results(df, make_model, n_data_points, batch_size_inference=100):
     X, y = get_x_y(df)
 
     for n_data_point in n_data_points:
@@ -37,7 +37,18 @@ def results(df, make_model, n_data_points):
         model.fit(X_sample, y_sample)
 
         print('Predicts and computes accuracy for the entire data set')
-        a = accuracy_score(y, model.predict(X))
+        
+        # Performs inference batched due to memory error
+        predictions = []
+        for batch_end_index in range(batch_size_inference, 
+                                     len(y) + batch_size_inference, 
+                                     batch_size_inference):
+            
+            batch = X[batch_end_index - batch_size_inference:batch_end_index]
+            batch_predictions = model.predict(batch)
+            predictions.extend(list(batch_predictions))
+        
+        a = accuracy_score(y, predictions)
 
         yield {
             'n_data_points': n_data_point,
