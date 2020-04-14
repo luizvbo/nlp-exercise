@@ -13,7 +13,6 @@
 # ---
 
 # %% colab={} colab_type="code" id="eu7iP06fGljZ"
-import tensorflow as tf
 from transformers import (
     TFDistilBertForSequenceClassification,
 )
@@ -23,12 +22,8 @@ from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.model_selection import train_test_split
 
 from utils import MAX_LEN
+import numpy as np
 
-import os
-import json
-import spacy
-
-spacy_nlp = spacy.load('en_core_web_sm')
 
 BERTMODEL = "distilbert-base-cased"
 PATH_CACHED_OUTPUT = '.cache/distilbert_outputs.json'
@@ -47,7 +42,6 @@ class BertClassifier(BaseEstimator, ClassifierMixin):
         self.n_epochs = n_epochs
         self.val_size = val_size
         self.learning_rate = learning_rate
-        self.cached_output = None
 
         # Load dataset, tokenizer, model from pretrained model/vocabulary
         self.tokenizer = (
@@ -59,28 +53,8 @@ class BertClassifier(BaseEstimator, ClassifierMixin):
             .from_pretrained(BERTMODEL)
         )
 
-        # Overwrite the 'distilbert' layer
-        self.model.distilbert = self._distilbert_wrapper(self.model.distilbert)
-
-    def _distilbert_wrapper(self, distilbert):
-
-        if self.cached_output is None:
-            if os.path.isfile(PATH_CACHED_OUTPUT):
-                with open(PATH_CACHED_OUTPUT) as f:
-                    self.cached_output = json.load(f)
-            else:
-                self.cached_output = {}
-
-        def _distilbert(inputs, **kwargs):
-            t_inputs = tuple(inputs)
-            if t_inputs in self.cached_output:
-                distilbert_output = self.cached_output[t_inputs].values
-            else:
-                distilbert_output = self.model.distilbert(inputs, **kwargs)
-                self.cached_output[t_inputs] = distilbert_output
-
-            return distilbert_output
-        return _distilbert
+        # Freeze distilbert layer
+        self.model.distilbert.trainable = False
 
     def summary(self):
         # Print model summary
@@ -101,22 +75,32 @@ class BertClassifier(BaseEstimator, ClassifierMixin):
                 max_length=MAX_LEN,          # Pad & truncate all sentences.
                 pad_to_max_length=True,
                 return_attention_mask=True,  # Construct attn. masks.
-                return_tensors='tf',
             )
         )
+        return (
+            np.array(encoded_dict['input_ids']),
+            np.array(encoded_dict['attention_mask'])
+        )
 
-        return encoded_dict['input_ids'], encoded_dict['attention_mask']
-
-    # set up the epoches to have better accuracy
     def train(self, X_train, y_train, X_val, y_val):
         self.scores = []
         self.loss = []
-        num_batch = int(X_train.shape[0] / self.batch_size)
+        num_batch = int(X_train[0].shape[0] / self.batch_size)
         for i in range(num_batch-1):
             start = i * self.batch_size
             end = (i + 1) * self.batch_size
-            history = self.model.fit(X_train[start:end], y_train[start:end],
-                                     validation_data=(X_val, y_val),
+            X_tr_dict = {'input_ids': X_train[0][start:end],
+                         'attention_mask': X_train[1][start:end]}
+
+            X_val_dict = {'input_ids': X_val[0],
+                          'attention_mask': X_val[1]}
+
+            print([v.shape for k, v in X_tr_dict.items()])
+            print([v.shape for k, v in X_val_dict.items()])
+            print(y_train[start:end].shape)
+
+            history = self.model.fit(X_tr_dict, y_train[start:end],
+                                     validation_data=(X_val_dict, y_val),
                                      epochs=self.n_epochs)
             self.scores.append(history.history['val_accuracy'])
             self.loss.append(history.history['val_loss'])
@@ -126,22 +110,18 @@ class BertClassifier(BaseEstimator, ClassifierMixin):
             train_test_split(X, y, test_size=self.val_size)
         )
 
-        ds_train = tf.data.Dataset.from_tensors(
-            (self.tokenize_sentences(X_train.tolist()), y_train)
-        ).shuffle(buffer_size=1024).batch(self.batch_size)
-
-        ds_val = tf.data.Dataset.from_tensors(
-            (self.tokenize_sentences(X_val.tolist()), y_val)
-        ).batch(64)
+        X_train = self.tokenize_sentences(X_train.tolist())
+        X_val = self.tokenize_sentences(X_val.tolist())
 
         self.model.compile(optimizer='adam', loss='binary_crossentropy',
                            metrics=['accuracy'])
         # self.train(X_train, y_train, X_val, y_val)
 
-        self.model.fit(ds_train, epochs=self.n_epochs,
-                       steps_per_epoch=115,
-                       validation_data=ds_val,
-                       validation_steps=7)
+        self.train(X_train, one_hot_encoder(y_train),
+                   X_val, one_hot_encoder(y_val))
 
-        with open(PATH_CACHED_OUTPUT, 'w') as f:
-            json.dump(self.cached_output, f)
+
+def one_hot_encoder(y):
+    one_hot = np.zeros((y.shape[0], 2))
+    one_hot[y, 1] = 1
+    return one_hot
