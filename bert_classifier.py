@@ -15,14 +15,17 @@
 # %% colab={} colab_type="code" id="eu7iP06fGljZ"
 from transformers import (
     TFDistilBertForSequenceClassification,
+    DistilBertConfig
 )
 from transformers.tokenization_distilbert import DistilBertTokenizerFast
 
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.model_selection import train_test_split
+import tensorflow as tf
 
 from utils import MAX_LEN
 import numpy as np
+import os
 
 
 BERTMODEL = "distilbert-base-cased"
@@ -43,6 +46,8 @@ class BertClassifier(BaseEstimator, ClassifierMixin):
         self.val_size = val_size
         self.learning_rate = learning_rate
 
+        config = DistilBertConfig.from_pretrained(BERTMODEL, num_labels=2)
+
         # Load dataset, tokenizer, model from pretrained model/vocabulary
         self.tokenizer = (
             DistilBertTokenizerFast
@@ -50,7 +55,7 @@ class BertClassifier(BaseEstimator, ClassifierMixin):
         )
         self.model = (
             TFDistilBertForSequenceClassification
-            .from_pretrained(BERTMODEL)
+            .from_pretrained(BERTMODEL, config=config)
         )
 
         # Freeze distilbert layer
@@ -95,9 +100,9 @@ class BertClassifier(BaseEstimator, ClassifierMixin):
             X_val_dict = {'input_ids': X_val[0],
                           'attention_mask': X_val[1]}
 
-            print([v.shape for k, v in X_tr_dict.items()])
-            print([v.shape for k, v in X_val_dict.items()])
-            print(y_train[start:end].shape)
+            print([v.shape for k,v in X_tr_dict.items()])
+            print([v.shape for k,v in X_val_dict.items()])
+            print(y_train[start:end].shape, y_val.shape)
 
             history = self.model.fit(X_tr_dict, y_train[start:end],
                                      validation_data=(X_val_dict, y_val),
@@ -105,23 +110,73 @@ class BertClassifier(BaseEstimator, ClassifierMixin):
             self.scores.append(history.history['val_accuracy'])
             self.loss.append(history.history['val_loss'])
 
+    def create_dataset(self, X, y, train=True):
+        input_ids, att_masks = self.tokenize_sentences(X)
+        # Convert labels to int32
+        labels = y
+
+        def gen():
+            for in_id, att_mk, label in zip(input_ids, att_masks, labels):
+                yield ({"input_ids": in_id, "attention_mask": att_mk}, label,)
+        return tf.data.Dataset.from_generator(
+            gen, ({"input_ids": tf.int32,
+                   "attention_mask": tf.int32}, tf.bool),
+            ({"input_ids": tf.TensorShape([None]),
+              "attention_mask": tf.TensorShape([None])}, tf.TensorShape([])),
+        )
+
     def fit(self, X, y):
         X_train, X_val, y_train, y_val = (
             train_test_split(X, y, test_size=self.val_size)
         )
 
-        X_train = self.tokenize_sentences(X_train.tolist())
-        X_val = self.tokenize_sentences(X_val.tolist())
+        ds_train = (
+            self.create_dataset(X_train.tolist(), y_train)
+            .shuffle(1000).batch(self.batch_size).repeat(-1)
+        )
+        ds_val = (
+            self.create_dataset(X_val.tolist(), y_val)
+            .batch(self.batch_size * 2)
+        )
 
-        self.model.compile(optimizer='adam', loss='binary_crossentropy',
-                           metrics=['accuracy'])
+        # Prepare training: Compile tf.keras model with optimizer, loss
+        # and learning rate schedule
+        opt = tf.keras.optimizers.Adam(learning_rate=3e-5, epsilon=1e-08)
+
+        loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
+        metric = tf.keras.metrics.SparseCategoricalAccuracy("accuracy")
+
+        self.model.compile(optimizer=opt, loss=loss, metrics=[metric])
+
+        # Train and evaluate using tf.keras.Model.fit()
+        train_steps = X_train.shape[0] // self.batch_size
+        val_steps = X_val.shape[0] // self.batch_size
+
+        self.history = self.model.fit(
+            ds_train,
+            epochs=self.n_epochs,
+            steps_per_epoch=train_steps,
+            validation_data=ds_val,
+            validation_steps=val_steps,
+        )
+
+        # Save TF2 model
+        os.makedirs("./model/", exist_ok=True)
+        self.model.save_pretrained("./model/")
+
+        # self.model.compile(optimizer='adam',
+        #                    loss='sparse_categorical_crossentropy',
+        #                    metrics=['accuracy'])
         # self.train(X_train, y_train, X_val, y_val)
 
-        self.train(X_train, one_hot_encoder(y_train),
-                   X_val, one_hot_encoder(y_val))
+        # self.train(X_train, one_hot_encoder(y_train),
+        #            X_val, one_hot_encoder(y_val))
 
+    def predict(self, X):
+        pass
 
 def one_hot_encoder(y):
-    one_hot = np.zeros((y.shape[0], 2))
-    one_hot[y, 1] = 1
-    return one_hot
+    return y
+    # one_hot = np.zeros((y.shape[0], 2))
+    # one_hot[y, 1] = 1
+    # return one_hot
