@@ -28,7 +28,6 @@ import numpy as np
 import os
 
 
-
 BERTMODEL = "distilbert-base-cased"
 MODEL_PATH = './model'
 BATCH_SIZE = 32
@@ -47,7 +46,6 @@ class BertClassifier(BaseEstimator, ClassifierMixin):
         self.n_epochs = n_epochs
         self.val_size = val_size
         self.learning_rate = learning_rate
-        self.fit = False
 
         # Load dataset, tokenizer, model from pretrained model/vocabulary
         self.tokenizer = (
@@ -177,13 +175,6 @@ class BertClassifier(BaseEstimator, ClassifierMixin):
         else:
             print("The model is not trained")
 
-        # self.model.compile(optimizer='adam',
-        #                    loss='sparse_categorical_crossentropy',
-        #                    metrics=['accuracy'])
-        # self.train(X_train, y_train, X_val, y_val)
-
-        # self.train(X_train, one_hot_encoder(y_train),
-        #            X_val, one_hot_encoder(y_val))
-
     def predict(self, X):
-        pass
+        input_ids, att_masks = self.tokenize_sentences(X.tolist())
+        return self.model((input_ids, att_masks))[0].numpy().argmax(axis=1)
