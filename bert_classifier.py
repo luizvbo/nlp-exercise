@@ -136,7 +136,7 @@ class BertClassifier(BaseEstimator, ClassifierMixin):
         )
         ds_val = (
             self.create_dataset(X_val.tolist(), y_val)
-            .batch(self.batch_size * 2)
+            .batch(self.batch_size * 2).repeat(-1)
         )
 
         # Prepare training: Compile tf.keras model with optimizer, loss
