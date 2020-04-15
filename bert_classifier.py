@@ -13,24 +13,23 @@
 # ---
 
 # %% colab={} colab_type="code" id="eu7iP06fGljZ"
-import tensorflow as tf
 from transformers import (
     TFDistilBertForSequenceClassification,
-    DistilBertTokenizer,
+    DistilBertConfig
 )
+from transformers.tokenization_distilbert import DistilBertTokenizerFast
 
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.model_selection import train_test_split
+import tensorflow as tf
 
 from utils import MAX_LEN
-from tqdm import tqdm
 import numpy as np
+import os
 
-import spacy
 
-spacy_nlp = spacy.load('en_core_web_sm')
-
-BERTMODEL = "distilbert-base-uncased"
+BERTMODEL = "distilbert-base-cased"
+MODEL_PATH = './model'
 BATCH_SIZE = 32
 N_EPOCHS = 30
 LEARNING_RATE = 3e-5
@@ -39,7 +38,8 @@ LEARNING_RATE = 3e-5
 class BertClassifier(BaseEstimator, ClassifierMixin):
     def __init__(self, max_seq_len=MAX_LEN, batch_size=BATCH_SIZE,
                  n_epochs=N_EPOCHS, val_size=0.1,
-                 learning_rate=LEARNING_RATE):
+                 learning_rate=LEARNING_RATE,
+                 load_local_pretrained=False):
 
         self.max_seq_len = max_seq_len
         self.batch_size = batch_size
@@ -49,62 +49,75 @@ class BertClassifier(BaseEstimator, ClassifierMixin):
 
         # Load dataset, tokenizer, model from pretrained model/vocabulary
         self.tokenizer = (
-            DistilBertTokenizer
-            .from_pretrained(BERTMODEL, cache_dir='./.cache/',
-                             do_lower_case=True)
-        )
-        self.model = (
-            TFDistilBertForSequenceClassification
-            .from_pretrained(BERTMODEL, cache_dir='./.cache/')
+            DistilBertTokenizerFast
+            .from_pretrained(BERTMODEL, do_lower_case=False)
         )
 
-        # Freezes all the layers (except the classifier and dropout)
-        print("Trainable layers")
-        print("=" * 16)
-        for layer in self.model.layers:
-            frozen_layers = ('distilbert')
-            layer.trainable = layer.name not in frozen_layers
-            print(layer.name + ":",  layer.trainable)
+        if load_local_pretrained:
+            self.model = (
+                TFDistilBertForSequenceClassification
+                .from_pretrained(MODEL_PATH)
+            )
+
+        else:
+            config = DistilBertConfig.from_pretrained(BERTMODEL, num_labels=2)
+            self.model = (
+                TFDistilBertForSequenceClassification
+                .from_pretrained(BERTMODEL, config=config)
+            )
+            # Freeze distilbert layer
+            self.model.distilbert.trainable = False
 
     def summary(self):
         # Print model summary
         self.model.summary()
 
     def tokenize_sentences(self, sentences):
-        input_ids = []
-        attention_masks = []
-
-        for sentence in tqdm(sentences):
-            # `encode_plus` will:
-            #   (1) Tokenize the sentence.
-            #   (2) Prepend the `[CLS]` token to the start.
-            #   (3) Append the `[SEP]` token to the end.
-            #   (4) Map tokens to their IDs.
-            #   (5) Pad or truncate the sentence to `max_length`
-            #   (6) Create attention masks for [PAD] tokens.
-            encoded_dict = (
-                self.tokenizer.encode_plus(
-                    sentence,                     # Sentence to encode.
-                    add_special_tokens=True,      # Add '[CLS]' and '[SEP]'
-                    max_length=self.max_seq_len,  # Pad & truncate.
-                    pad_to_max_length=True,
-                    return_attention_mask=True,   # Construct attn. masks.
-                )
+        # `encode_plus` will:
+        #   (1) Tokenize the sentence.
+        #   (2) Prepend the `[CLS]` token to the start.
+        #   (3) Append the `[SEP]` token to the end.
+        #   (4) Map tokens to their IDs.
+        #   (5) Pad or truncate the sentence to `max_length`
+        #   (6) Create attention masks for [PAD] tokens.
+        encoded_dict = (
+            self.tokenizer.batch_encode_plus(
+                sentences,                   # Sentence to encode.
+                add_special_tokens=True,     # Add '[CLS]' and '[SEP]'
+                max_length=MAX_LEN,          # Pad & truncate all sentences.
+                pad_to_max_length=True,
+                return_attention_mask=True,  # Construct attn. masks.
             )
-
-            # Add the encoded sentence to the list.
-            input_ids.append(encoded_dict['input_ids'])
-            # And its attention mask (simply differentiates padding
-            # from non-padding).
-            attention_masks.append(encoded_dict['attention_mask'])
-
+        )
         return (
-            np.array(input_ids, dtype=np.int32),
-            np.array(attention_masks, dtype=np.int32)
+            np.array(encoded_dict['input_ids']),
+            np.array(encoded_dict['attention_mask'])
         )
 
-    def create_dataset(self, X, y, train=True):
+    def train(self, X_train, y_train, X_val, y_val):
+        self.scores = []
+        self.loss = []
+        num_batch = int(X_train[0].shape[0] / self.batch_size)
+        for i in range(num_batch-1):
+            start = i * self.batch_size
+            end = (i + 1) * self.batch_size
+            X_tr_dict = {'input_ids': X_train[0][start:end],
+                         'attention_mask': X_train[1][start:end]}
 
+            X_val_dict = {'input_ids': X_val[0],
+                          'attention_mask': X_val[1]}
+
+            print([v.shape for k,v in X_tr_dict.items()])
+            print([v.shape for k,v in X_val_dict.items()])
+            print(y_train[start:end].shape, y_val.shape)
+
+            history = self.model.fit(X_tr_dict, y_train[start:end],
+                                     validation_data=(X_val_dict, y_val),
+                                     epochs=self.n_epochs)
+            self.scores.append(history.history['val_accuracy'])
+            self.loss.append(history.history['val_loss'])
+
+    def create_dataset(self, X, y, train=True):
         input_ids, att_masks = self.tokenize_sentences(X)
         # Convert labels to int32
         labels = y
@@ -112,7 +125,6 @@ class BertClassifier(BaseEstimator, ClassifierMixin):
         def gen():
             for in_id, att_mk, label in zip(input_ids, att_masks, labels):
                 yield ({"input_ids": in_id, "attention_mask": att_mk}, label,)
-
         return tf.data.Dataset.from_generator(
             gen, ({"input_ids": tf.int32,
                    "attention_mask": tf.int32}, tf.bool),
@@ -125,32 +137,44 @@ class BertClassifier(BaseEstimator, ClassifierMixin):
             train_test_split(X, y, test_size=self.val_size)
         )
 
-        print("Creating training set")
-        ds_train = self.create_dataset(X_train, y_train)
-        print("Creating validation set")
-        ds_val = self.create_dataset(X_val, y_val)
-
-        # %% colab={} colab_type="code" id="a-JK58wy8tPn"
         ds_train = (
-            ds_train.shuffle(1000)
-            .batch(self.batch_size)
-            .repeat(self.n_epochs)
+            self.create_dataset(X_train.tolist(), y_train)
+            .shuffle(1000).batch(self.batch_size).repeat(-1)
         )
-        ds_val = ds_val.batch(self.batch_size)
+        ds_val = (
+            self.create_dataset(X_val.tolist(), y_val)
+            .batch(self.batch_size * 2).repeat(-1)
+        )
 
-        steps_per_epoch = X_train.shape[0] // self.batch_size
-        validation_steps = X_val.shape[0] // self.batch_size
+        # Prepare training: Compile tf.keras model with optimizer, loss
+        # and learning rate schedule
+        opt = tf.keras.optimizers.Adam(learning_rate=3e-5, epsilon=1e-08)
 
-        # Prepare training: Compile tf.keras model with optimizer, loss and
-        # learning rate schedule
-        optimizer = tf.keras.optimizers.Adam(learning_rate=self.learning_rate)
+        loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
+        metric = tf.keras.metrics.SparseCategoricalAccuracy("accuracy")
 
-        self.model.compile(optimizer=optimizer,
-                           loss='binary_crossentropy',
-                           metrics=['accuracy'])
+        self.model.compile(optimizer=opt, loss=loss, metrics=[metric])
 
-        self.history = self.model.fit(ds_train, epochs=self.n_epochs,
-                                      steps_per_epoch=steps_per_epoch,
-                                      validation_data=ds_val,
-                                      validation_steps=validation_steps)
+        # Train and evaluate using tf.keras.Model.fit()
+        train_steps = X_train.shape[0] // self.batch_size
+        val_steps = X_val.shape[0] // self.batch_size
 
+        self.history = self.model.fit(
+            ds_train,
+            epochs=self.n_epochs,
+            steps_per_epoch=train_steps,
+            validation_data=ds_val,
+            validation_steps=val_steps,
+        )
+
+    def save_model(self):
+        if self.fit:
+            # Save TF2 model
+            os.makedirs(MODEL_PATH, exist_ok=True)
+            self.model.save_pretrained(MODEL_PATH)
+        else:
+            print("The model is not trained")
+
+    def predict(self, X):
+        input_ids, att_masks = self.tokenize_sentences(X.tolist())
+        return self.model((input_ids, att_masks))[0].numpy().argmax(axis=1)
