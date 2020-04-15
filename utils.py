@@ -26,11 +26,11 @@ def get_x_y(df):
 
 
 def results(df, make_model, n_data_points,
-            batch_size_inference=100, X_representations=None, test_size=0.15):
+            batch_size_inference=100, X_representation=None, test_size=0.15):
     X, y = get_x_y(df)
     
-    if X_representations is not None:
-        X = X_representations
+    if X_representation is not None:
+        X = X_representation
 
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size)
 
