@@ -28,8 +28,9 @@ import numpy as np
 import os
 
 
+
 BERTMODEL = "distilbert-base-cased"
-PATH_CACHED_OUTPUT = '.cache/distilbert_outputs.json'
+MODEL_PATH = './model'
 BATCH_SIZE = 32
 N_EPOCHS = 30
 LEARNING_RATE = 3e-5
@@ -38,28 +39,36 @@ LEARNING_RATE = 3e-5
 class BertClassifier(BaseEstimator, ClassifierMixin):
     def __init__(self, max_seq_len=MAX_LEN, batch_size=BATCH_SIZE,
                  n_epochs=N_EPOCHS, val_size=0.1,
-                 learning_rate=LEARNING_RATE):
+                 learning_rate=LEARNING_RATE,
+                 load_local_pretrained=False):
 
         self.max_seq_len = max_seq_len
         self.batch_size = batch_size
         self.n_epochs = n_epochs
         self.val_size = val_size
         self.learning_rate = learning_rate
-
-        config = DistilBertConfig.from_pretrained(BERTMODEL, num_labels=2)
+        self.fit = False
 
         # Load dataset, tokenizer, model from pretrained model/vocabulary
         self.tokenizer = (
             DistilBertTokenizerFast
             .from_pretrained(BERTMODEL, do_lower_case=False)
         )
-        self.model = (
-            TFDistilBertForSequenceClassification
-            .from_pretrained(BERTMODEL, config=config)
-        )
 
-        # Freeze distilbert layer
-        self.model.distilbert.trainable = False
+        if load_local_pretrained:
+            self.model = (
+                TFDistilBertForSequenceClassification
+                .from_pretrained(MODEL_PATH)
+            )
+
+        else:
+            config = DistilBertConfig.from_pretrained(BERTMODEL, num_labels=2)
+            self.model = (
+                TFDistilBertForSequenceClassification
+                .from_pretrained(BERTMODEL, config=config)
+            )
+            # Freeze distilbert layer
+            self.model.distilbert.trainable = False
 
     def summary(self):
         # Print model summary
@@ -160,9 +169,13 @@ class BertClassifier(BaseEstimator, ClassifierMixin):
             validation_steps=val_steps,
         )
 
-        # Save TF2 model
-        os.makedirs("./model/", exist_ok=True)
-        self.model.save_pretrained("./model/")
+    def save_model(self):
+        if self.fit:
+            # Save TF2 model
+            os.makedirs(MODEL_PATH, exist_ok=True)
+            self.model.save_pretrained(MODEL_PATH)
+        else:
+            print("The model is not trained")
 
         # self.model.compile(optimizer='adam',
         #                    loss='sparse_categorical_crossentropy',
@@ -174,9 +187,3 @@ class BertClassifier(BaseEstimator, ClassifierMixin):
 
     def predict(self, X):
         pass
-
-def one_hot_encoder(y):
-    return y
-    # one_hot = np.zeros((y.shape[0], 2))
-    # one_hot[y, 1] = 1
-    # return one_hot
