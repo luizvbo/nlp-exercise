@@ -23,9 +23,10 @@ from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.model_selection import train_test_split
 import tensorflow as tf
 
-from utils import MAX_LEN
+from tqdm import tqdm
 import numpy as np
 import os
+from utils import MAX_LEN
 
 
 BERTMODEL = "distilbert-base-cased"
@@ -176,5 +177,12 @@ class BertClassifier(BaseEstimator, ClassifierMixin):
             print("The model is not trained")
 
     def predict(self, X):
-        input_ids, att_masks = self.tokenize_sentences(X.tolist())
-        return self.model((input_ids, att_masks))[0].numpy().argmax(axis=1)
+        n_batches = X.shape[0] // self.batch_size
+        input_ids, attention_masks = self.tokenize_sentences(X.tolist())
+        y_pred = []
+        input_ids_batches = np.array_split(input_ids, n_batches)
+        att_masks_batches = np.array_split(attention_masks, n_batches)
+        for batch in tqdm(zip(input_ids_batches, att_masks_batches),
+                          total=n_batches):
+            y_pred.append(self.model(batch)[0].numpy().argmax(axis=1))
+        return np.concatenate(y_pred)
