@@ -95,29 +95,6 @@ class BertClassifier(BaseEstimator, ClassifierMixin):
             np.array(encoded_dict['attention_mask'])
         )
 
-    def train(self, X_train, y_train, X_val, y_val):
-        self.scores = []
-        self.loss = []
-        num_batch = int(X_train[0].shape[0] / self.batch_size)
-        for i in range(num_batch-1):
-            start = i * self.batch_size
-            end = (i + 1) * self.batch_size
-            X_tr_dict = {'input_ids': X_train[0][start:end],
-                         'attention_mask': X_train[1][start:end]}
-
-            X_val_dict = {'input_ids': X_val[0],
-                          'attention_mask': X_val[1]}
-
-            print([v.shape for k,v in X_tr_dict.items()])
-            print([v.shape for k,v in X_val_dict.items()])
-            print(y_train[start:end].shape, y_val.shape)
-
-            history = self.model.fit(X_tr_dict, y_train[start:end],
-                                     validation_data=(X_val_dict, y_val),
-                                     epochs=self.n_epochs)
-            self.scores.append(history.history['val_accuracy'])
-            self.loss.append(history.history['val_loss'])
-
     def create_dataset(self, X, y, train=True):
         input_ids, att_masks = self.tokenize_sentences(X)
         # Convert labels to int32
@@ -149,7 +126,8 @@ class BertClassifier(BaseEstimator, ClassifierMixin):
 
         # Prepare training: Compile tf.keras model with optimizer, loss
         # and learning rate schedule
-        opt = tf.keras.optimizers.Adam(learning_rate=3e-5, epsilon=1e-08)
+        opt = tf.keras.optimizers.Adam(learning_rate=self.learning_rate,
+                                       epsilon=1e-08)
 
         loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
         metric = tf.keras.metrics.SparseCategoricalAccuracy("accuracy")
@@ -178,11 +156,9 @@ class BertClassifier(BaseEstimator, ClassifierMixin):
 
     def predict(self, X):
         n_batches = X.shape[0] // self.batch_size
-        input_ids, attention_masks = self.tokenize_sentences(X.tolist())
+        input_ids, _ = self.tokenize_sentences(X.tolist())
         y_pred = []
         input_ids_batches = np.array_split(input_ids, n_batches)
-        att_masks_batches = np.array_split(attention_masks, n_batches)
-        for batch in tqdm(zip(input_ids_batches, att_masks_batches),
-                          total=n_batches):
+        for batch in tqdm(input_ids_batches):
             y_pred.append(self.model(batch)[0].numpy().argmax(axis=1))
         return np.concatenate(y_pred)

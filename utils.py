@@ -28,7 +28,7 @@ def get_x_y(df):
 def results(df, make_model, n_data_points,
             batch_size_inference=100, X_representation=None, test_size=0.15):
     X, y = get_x_y(df)
-    
+
     if X_representation is not None:
         X = X_representation
 
@@ -43,17 +43,20 @@ def results(df, make_model, n_data_points,
         model.fit(X_sample, y_sample)
 
         print('Predicts and computes accuracy for the test set')
-        
-        # Performs inference batched due to memory error
-        test_predictions = []
-        for batch_end_index in range(batch_size_inference, 
-                                     len(y_test) + batch_size_inference, 
-                                     batch_size_inference):
-            
-            batch = X_test[batch_end_index - batch_size_inference:batch_end_index]
-            batch_predictions = model.predict(batch)
-            test_predictions.extend(list(batch_predictions))
-        
+
+        if batch_size_inference is not None:
+            # Performs inference batched due to memory error
+            test_predictions = []
+            for batch_end_index in range(batch_size_inference,
+                                         len(y_test) + batch_size_inference,
+                                         batch_size_inference):
+
+                batch = X_test[batch_end_index - batch_size_inference:batch_end_index]
+                batch_predictions = model.predict(batch)
+                test_predictions.extend(list(batch_predictions))
+        else:
+            test_predictions = model.predict(X_test)
+
         a = accuracy_score(y_test, test_predictions)
 
         yield {
